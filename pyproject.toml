@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "fluf"
-version = "0.1.5"
+version = "0.1.8"
 description = "Simple caching & workflow"
 authors = ["Mark Fiers <mark.fiers.42@gmail.com>"]
 
@@ -8,6 +8,7 @@ authors = ["Mark Fiers <mark.fiers.42@gmail.com>"]
 python = "^3.7"
 dill = "^0.3.3"
 matplotlib = "^3.3.3"
+peewee = "^3.14.0"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.1"

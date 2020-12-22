@@ -1,192 +1,63 @@
 
-import argparse
-import atexit
-from collections import defaultdict, namedtuple
-from functools import partial
-from hashlib import sha256
+from datetime import datetime
+from functools import partial, wraps
 import inspect
+import itertools
 import logging
 import os
-import pickle
 import socket
-import sqlite3
 import sys
+import time
+
 
 import dill
-import matplotlib.pyplot as plt
 
+
+from .flufio import pickle_loader, pickle_saver
+from .flufio import mpl_loader, mpl_saver
+from .flufio import txt_loader, txt_saver
+from .memcache import insert_memcache, from_memcache, in_memcache
+from .helpers import publish_file, set_workfolder, get_workfolder, \
+    get_cachefolder, get_func_code_checksum
+import fluf.db as db
+import fluf.config as config
+
+
+db.instantiate()
 
 lgr = logging.getLogger('FLUF')
-lgr_memcache = logging.getLogger('FLUF.memcache')
-lgr_callstack = logging.getLogger('FLUF.callstack')
-
 lgr.setLevel(logging.INFO)
-lgr_memcache.setLevel(logging.INFO)
+
+lgr_callstack = logging.getLogger('FLUF.callstack')
 lgr_callstack.setLevel(logging.INFO)
 
-flufcall = namedtuple('FlufCall', ['name', 'objhash', 'callhash'])
 
-
+#
 # globals
-WORKFOLDER = 'fluf'
+#
+
 DEFAULTPUBLISH = True
-HASHLEN = 10
-MEMCACHE = defaultdict(list)
-OBJHASHES = set()
+CHECKSUMLEN = 10
+
+FUNCTIONS_OBSERVED = set()
 CACHENAMES = set()
 PUBLISHED = []
 CALLHISTORY = []
 
+
 # fluf workflows are meant to be simple - so one main script is responsible
 # the checksum of that script is the call database
-callscript = os.path.abspath(os.path.expanduser(sys.argv[0]))
-scripthash = sha256()
-scripthash.update(socket.gethostname().encode())
-scripthash.update(callscript.encode())
-scripthash = scripthash.hexdigest()[:HASHLEN]
-lgr.debug("Script: %s scripthash %s", callscript, scripthash)
-fluffolder = os.path.join(os.path.expanduser('~'), '.cache', 'fluf')
-if not os.path.exists(fluffolder):
-    os.makedirs(fluffolder)
 
-calldbname = os.path.join(fluffolder, f"{scripthash}.db")
-dbconn = sqlite3.connect(calldbname)
-dbcursor = dbconn.cursor()
-dbcursor.execute('''CREATE TABLE IF NOT EXISTS calls
-                   (caller_name text,
-                    caller_objhash text,
-                    caller_callhash text,
-                    called_name text,
-                    called_objhash text,
-                    called_callhash text) ''')
+STARTTIME = datetime.now()
+
+_RUN = None
 
 
-def exit_handler():
-    lgr.info("closing db")
-    dbconn.close()
-
-
-atexit.register(exit_handler)
-
-
-#
-# fluf configuration
-#
-
-def set_workfolder(workfolder):
-    global WORKFOLDER
-    if len(OBJHASHES) > 0:
-        print("Must set workfolder before any fluf definitions")
-        exit()
-    WORKFOLDER = workfolder
-
-
-def set_defaultpublish(publish):
-    global DEFAULTPUBLISH
-    DEFAULTPUBLISH = publish
-
-
-def pickle_loader(filename):
-    with open(filename, 'rb') as F:
-        return pickle.load(F)
-
-
-def pickle_saver(obj, filename):
-    with open(filename, 'wb') as F:
-        pickle.dump(obj, F, protocol=4)
-
-
-def mpl_saver(obj, filename):
-    if obj is None:
-        obj = plt.gcf()
-    lgr.info("saving image to %s", filename)
-    obj.savefig(filename, format='png', bbox_inches='tight')
-    plt.close()
-
-
-def mpl_loader(filename):
-    """ we really never want to load an image again """
-    return None
-
-
-def txt_saver(obj, filename):
-    with open(filename, 'w') as F:
-        F.write(obj)
-
-
-def txt_loader(filename):
-    with open(filename) as F:
-        return F.read()
-
-
-def get_obj_hash(func):
-    """ Calculate a per function call specific hash """
-    hasher = sha256()
-    func_code = inspect.getsource(func).strip()
-    hasher.update(dill.dumps(func_code))
-    objhash = hasher.hexdigest()[:HASHLEN]
-
-    lgr.debug(f"function hash for {func.__name__} call is {objhash}")
-
-    return objhash
-
-
-def get_call_hash(objhash, args, kwargs):
-
-    hasher = sha256()
-    hasher.update(objhash.encode())
-
-    for a in args:
-        hasher.update(dill.dumps(a))
-
-    for (k, v) in sorted(kwargs.items()):
-        hasher.update(dill.dumps(k))
-        hasher.update(dill.dumps(v))
-
-    callhash = hasher.hexdigest()[:HASHLEN]
-    lgr.debug(f"call hash with func {objhash}: {callhash}")
-
-    return callhash
-
-
-#
-# MEMCACHE
-#
-
-def insert_memcache(objhash, callhash, rv):
-    global MEMCACHE
-    lgr_memcache.debug(f"Insert into memcache: {objhash}/{callhash}")
-    MEMCACHE[objhash].append((callhash, rv))
-
-
-def from_memcache(objhash, callhash):
-    for k, v in MEMCACHE[objhash]:
-        if k == callhash:
-            lgr_memcache.debug(
-                f"Returning from memcache: {objhash}/{callhash}")
-            return v
-
-
-def in_memcache(objhash, callhash):
-    lgr_memcache.debug('check objhash/callhash in memcache: %s/%s',
-                       objhash, callhash)
-    if objhash in MEMCACHE:
-        for a, b in MEMCACHE[objhash]:
-            if a == callhash:
-                lgr_memcache.debug(f"Found in memcache: {objhash}/{callhash}")
-                return True
-    else:
-        lgr_memcache.debug(f"Not in memcache: {objhash}/{callhash}")
-        return False
-
-
-def publish_file(cachefilename, pubfilename):
-    """ publish a file - e.g. - hardlink from the cache
-        folder to the workfolder
-    """
-    if os.path.exists(pubfilename):
-        os.unlink(pubfilename)
-    os.link(cachefilename, pubfilename)
+def get_scriptrun_object():
+    global _RUN
+    if _RUN is None:
+        _RUN = db.ScriptRun.init(STARTTIME)
+    return _RUN
 
 
 def cache(cachename=None,
@@ -198,8 +69,10 @@ def cache(cachename=None,
           diskcache=True,
           memcache=8):
 
-    workfolder = WORKFOLDER
-    cachefolder = os.path.join(WORKFOLDER, 'fluf')
+    # globals for later use
+    workfolder = get_workfolder()
+    cachefolder = get_cachefolder()
+
     if publish is None:
         publish = DEFAULTPUBLISH
 
@@ -208,165 +81,353 @@ def cache(cachename=None,
 
     def cache_decorator(func):
 
-        objhash = get_obj_hash(func)
-        OBJHASHES.add(objhash)
+        func.ffunc = db.Function.init(func)
+        func.scriptrun = get_scriptrun_object()
+        func.scriptrun.add_function(func.ffunc)
 
+        @wraps(func)  # so we don't lose function sign.
         def _fluf_func_wrapper(*args, **kwargs):
 
-            callhash = get_call_hash(objhash, args, kwargs)
+            publish_this_call = kwargs.get('_publish', publish)
 
+            # determine the basename of this function call
             if '_cachename' in kwargs:
                 basename = kwargs['_cachename']
-            elif cachename is None:
-                basename = func.__name__
-                if cachename in CACHENAMES:
-                    i = 0
-                    while f"{cachename}{i:03d}" in CACHENAMES:
-                        i += 1
-                    basename = f"{cachename}{i:03d}"
-            else:
+            elif cachename is not None:
                 basename = cachename
+            else:
+                basename = func.__name__
 
-            CACHENAMES.add(basename)
+            CACHENAMES.add(basename)  # TODO: move this to the db
 
-            this_function_call = flufcall(name=basename, objhash=objhash,
-                                          callhash=callhash)
-            cfbase = callhash + '.' + basename + '.' + extension
+            fcall = func.ffunc.get_call(basename, args, kwargs)
+            srun_fcall = func.scriptrun.add_call(fcall)  # for logging
+
+            cfbase = fcall.checksum + '.' + basename + '.' + extension
             pubname = basename + '.' + extension
             cachefilename = os.path.join(cachefolder, cfbase)
-            if publish:
-                pubfilename = os.path.join(workfolder, pubname)
+            pubfilename = os.path.join(workfolder, pubname)
+
+
+            if publish_this_call:
                 if pubfilename in PUBLISHED:
-                    lgr.critical("Duplicate name to publish")
+                    lgr.critical("Duplicate publish name - " +
+                                 "they will be overwritten")
 
             lgr.debug(f"final cache file name is {cachefilename}")
+
+            action_taken = None
+            why_not_use_diskcache = ""
+
 
             if cache:
                 # we do try to use the cache
 
-                if in_memcache(objhash, callhash):
-                    lgr.info("<M Return from memcache %s obj:%s call:%s",
-                             basename, objhash, callhash)
+                if in_memcache(fcall):
+                    lgr.debug("<M Return from memcache %s %s",
+                             basename, fcall)
                     # if already im memcache - we assume the file was
                     # published - so do not check here
-                    return from_memcache(objhash, callhash)
+                    action_taken = 'memcache'
 
-                if diskcache:
+                    # value to return
+                    rv = from_memcache(fcall)
+
+                elif diskcache:
                     # attempt retrieval from diskache
+
+                    # we only check the callstack when accessing diskcache
+                    # assume that there is no metaprogramming - hence - if something
+                    # is in memcache - the code cannot have changed.
+
+                    # first prepare callstack to see if there are code changes
+                    prep_callstack(func)
 
                     diskcache_exist = os.path.exists(cachefilename)
                     diskcache_notzero = os.stat(cachefilename).st_size > 0 \
                         if diskcache_exist else False
 
-                    diskcache_callstack = check_call_stack(this_function_call)
+                    if not diskcache_exist:
+                        why_not_use_diskcache = 'does not exist'
+                        lgr.debug("Not using diskcache - cachefile does not exist")
+                    elif not diskcache_notzero:
+                        why_not_use_diskcache = 'cache filesize zero'
+                        lgr.debug("Not using diskcache - cachefile is empty")
+                    elif fcall.dirty:
+                        why_not_use_diskcache = 'fcall dirty'
+                        lgr.debug("Not using diskcache - callstack  not valid")
 
-                if not diskcache_exist:
-                    lgr.debug("Not using diskcache - cachefile does not exist")
-                elif not diskcache_notzero:
-                    lgr.debug("Not using diskcache - cachefile is empty")
-                elif not diskcache_callstack:
-                    lgr.debug("Not using diskcache - callstack changed")
+                    if (diskcache_exist and diskcache_notzero
+                                        and (not fcall.dirty)):  # NOQA E127
 
-                if diskcache_exist and diskcache_notzero and diskcache_callstack:
-                    lgr.info("<D Return from diskcache: %s obj:%s call:%s", basename, objhash, callhash)
-                    rv = loader(cachefilename)
-                    insert_memcache(objhash, callhash, rv)
+                        action_taken = 'diskcache'
+                        lgr.debug(f"<D Return from diskcache {fcall}")
+                        rv = loader(cachefilename)
+                        insert_memcache(fcall, rv)
 
-                    publish_file(cachefilename, pubfilename)
-                    return rv
+                    else:
+                        lgr.debug(f"Not using diskcache because: "
+                                  f"'{why_not_use_diskcache}': %s %s",
+                                  basename, fcall)
 
-            lgr.info("<R (re)running function: %s obj:%s call:%s", basename, objhash, callhash)
-            lgr.debug('#### Run function: %s %s %s', func.__name__,
-                      objhash, callhash)
+            if action_taken is None:
 
-            # when calling this function - see what is called
-            # so we can recall later if all parent bits have not
-            # changed
+                # it appears we've not found anything to return yet
+                # - so - we'll have to re-run the function
+                lgr.debug("<R (re)running function: %s %s",
+                          basename, fcall)
+                action_taken = 'run'
 
-            for frameinfo in inspect.stack()[1:]: # start from one - omit self
+                # when calling this function - see what is called
+                # so we can recall later if all parent bits have not
+                # changed
 
-                frameloc = frameinfo.frame.f_locals
-                if frameinfo.function == '_fluf_func_wrapper':
-                    caller_function = flufcall(name=frameloc['basename'],
-                                               objhash=frameloc['objhash'],
-                                               callhash=frameloc['callhash'])
-                    save_to_callstack(caller_function, this_function_call)
+                rv = func(*args, **kwargs)
+                if cache and diskcache and cachefilename is not None:
+                    lgr.debug("caching to: %s", cachefilename)
+                    saver(rv, cachefilename)
+                insert_memcache(fcall, rv)
 
-            rv = func(*args, **kwargs)
-            if cache and diskcache and cachefilename is not None:
-                lgr.debug("caching to: %s", cachefilename)
-                saver(rv, cachefilename)
-            insert_memcache(objhash, callhash, rv)
-            if publish:
+            store_callstack(fcall)
+            if publish_this_call:
                 publish_file(cachefilename, pubfilename)
+            srun_fcall.action = action_taken
+            srun_fcall.why_not_cache = why_not_use_diskcache
+            srun_fcall.stop = datetime.now()
+            srun_fcall.runtime = (srun_fcall.stop - srun_fcall.start).total_seconds()
+            srun_fcall.save()
+            fcall.dirty = False
+            fcall.save()
+            lgr.info(f"Function {fcall} - {action_taken}")
             return rv
 
         return _fluf_func_wrapper
     return cache_decorator
 
 
-INSERT_SQL = '''
-INSERT INTO calls (caller_name, caller_objhash, caller_callhash,
-                   called_name, called_objhash, called_callhash)
-SELECT ?, ?, ?, ?, ?, ?
-WHERE NOT EXISTS(SELECT 1
-                   FROM calls
-                  WHERE caller_name = ?
-                  AND caller_objhash = ?
-                  AND caller_callhash = ?
-                  AND called_name = ?
-                  AND called_objhash = ?
-                  AND called_callhash = ?)
-'''
+def store_callstack(fcall):
+    lgr.debug(f'investigate callstack of "{fcall}"')
+    for frameinfo in inspect.stack()[2:]:
+        # skip the first two entries
+        #   - entry one is this function
+        #   - entry two is the calling fcuntion (which is already in fcall)
+
+        frameloc = frameinfo.frame.f_locals
+        if frameinfo.function != '_fluf_func_wrapper':
+            continue
+        if 'fcall' not in frameloc:
+            continue
+        fcaller = frameloc['fcall']
+        if fcaller == fcall:
+            continue
+        fcall.add_caller(fcaller)
+        lgr.debug(f"{fcall} called by {fcaller}")
+        break  # only store immediate caller function
 
 
-def save_to_callstack(caller_function, called_function):
+def print_state(func):
+    ffunc = func.ffunc
+    srun = func.scriptrun
+    # funcs_in_this_run = [srf.function for srf in srun.srun_funcs]
 
-    # check if the call
-    lgr_callstack.debug('Callstack save %s called %s',
-                        caller_function, called_function)
+    # print(f"State of function: {ffunc} {srun}")
+    # dirty_calls = []
+    # affected_calls = []
+    # affected_relations = []
 
-    dbcursor.execute(INSERT_SQL,
-                     (caller_function.name, caller_function.objhash,
-                      caller_function.callhash, called_function.name,
-                      called_function.objhash, called_function.callhash,
-                      caller_function.name, caller_function.objhash,
-                      caller_function.callhash, called_function.name,
-                      called_function.objhash, called_function.callhash))
+    # def find_affected(fcall):
+    #     rfunc = fcall.function
+    #     dirty = rfunc not in funcs_in_this_run
+    #     if dirty:
+    #         dirty_calls.append(fcall)
+    #         affected_calls.append(fcall)
 
-    dbconn.commit()
+    #     any_called_dirty = False
+    #     for fcaller in fcall.caller:
+    #         if find_affected(fcaller.called):
+    #             # caller is affected - we are affected
+    #             any_called_dirty = True
+    #             affected_relations.append(fcaller)
+
+    #     if any_called_dirty:
+    #         affected_calls.append(fcall)
+
+    #     return any_called_dirty or dirty
+
+    # for fcall in ffunc.calls:
+    #     find_affected(fcall)
+
+    # # for d in dirty_calls:
+    # #     print('dirty', d)
+    # # for d in affected_calls:
+    # #     print('affected', d)
+    # # for d in affected_relations:
+    # #     print('affected relation', d)
+
+    def print_call(prefix, fcall):
+        print(prefix, fcall)
+        for fcaller in fcall.caller:
+            print_call("  " + prefix, fcaller.called)
+
+    for fcall in ffunc.calls:
+        print_call("", fcall)
 
 
-def check_call_stack(caller):
+def prep_callstack(func, delete_relations=True):
+    ffunc = func.ffunc
+    srun = func.scriptrun
+    funcs_in_this_run = [srf.function for srf in srun.srun_funcs]
 
-    lgr_callstack.debug('$ check callstack for: %s obj:%s call:%s ',
-                        caller.name, caller.objhash, caller.callhash)
-    nothing_changed = True
+    affected_relations = []
 
-    for rec in dbcursor.execute(
-            """SELECT called_name, called_objhash
-                 FROM calls
-                WHERE caller_callhash = ?""",
-            (caller.callhash, )):
+    with db.DB.atomic():
+        def find_affected(fcall):
+            rfunc = fcall.function
+            dirty = rfunc not in funcs_in_this_run
+            if dirty:
+                fcall.dirty = True
 
-        called_name, called_objhash = rec
-        called_present = called_objhash in OBJHASHES
-        if called_present:
-            lgr_callstack.debug("  - called %s obj:%s still ok",
-                                called_name, called_objhash)
-        else:
-            lgr_callstack.info("  - Change in callstack for %s: %s obj:%s !!!",
-                               caller.name, called_name, called_objhash)
-            nothing_changed = False
-            # remove this record from callstack
-            dbcursor.execute("""DELETE FROM calls
-                                 WHERE caller_objhash = ?
-                                   AND caller_callhash = ?
-                                   AND called_objhash = ? """,
-                             (caller.objhash, caller.callhash, called_objhash))
+            any_called_dirty = False
+            for fcaller in fcall.caller:
+                if find_affected(fcaller.called):
+                    any_called_dirty = True
+                    affected_relations.append(fcaller)
+                    fcall.dirty = True
 
-    return nothing_changed
+            fcall.save()
 
+            return any_called_dirty or dirty
+
+        #lgr.info("Prep callstack: %d calls dirty, %d calls affected, %d relations affected",
+        #         len(dirty_calls), len(affected_calls), len(affected_relations))
+
+        for fcall in ffunc.calls:
+            find_affected(fcall)
+
+        if delete_relations:
+            for r in affected_relations:
+                r.delete_instance()
+
+
+def print_db_dump():
+
+    for fnc in db.Function.select():
+        print('|', fnc)
+        for fcl in db.FunctionCall.select()\
+            .where(db.FunctionCall.function == fnc):
+            print('| |', fcl)
+            for f2f in db.FunctionCallFunction.select()\
+                .where(db.FunctionCallFunction.caller == fcl):
+                print('| | |', f2f)
+
+    lastrun = db.ScriptRun.select().order_by(-db.ScriptRun.start).get()
+    for c in db.ScriptRun.select().order_by(-db.ScriptRun.start).limit(3):
+        is_lastrun = '*' if c == lastrun else ''
+        print('scrpt:', is_lastrun + str(c), c.start)
+
+    for c in db.ScriptRunFunction.select()\
+        .where(db.ScriptRunFunction.scriptrun == lastrun):
+        print('srun_function  ', c, c.function)
+    for c in db.ScriptRunFunctionCall.select()\
+        .where(db.ScriptRunFunctionCall.scriptrun == lastrun)\
+        .order_by(db.ScriptRunFunctionCall.start):
+        print('srun_fcall ', c, c.runtime, c.why_not_cache)
+#    fluf.print_run_info(test5)
+
+
+def print_run_info(func):
+    ffunc = func.ffunc
+    srun = func.scriptrun
+    print(f"Function: {ffunc} {srun}")
+
+    SRFC = db.ScriptRunFunctionCall
+    def print_call(prefix, fcall):
+        sfcall = SRFC.select().where(
+            SRFC.fcall == fcall).get()
+        print(prefix, fcall.name, fcall) #, sfcall)
+        for fcaller in fcall.caller:
+            print_call("  " + prefix, fcaller.called)
+    for fcall in ffunc.calls:
+        print_call("->", fcall)
+
+# def get_called(caller):
+
+#     for rec in dbcursor.execute(
+#             """SELECT called_name, called_objhash, called_calldefhash
+#                FROM calls
+#                WHERE caller_calldefhash = ?""",
+#             (caller.calldefhash, )):
+
+#         called = function_call(name=rec[0], objhash=rec[1], calldefhash=rec[2])
+#         yield caller.name, called
+#         if caller.objhash != called.objhash:
+#             yield from get_called(called)
+
+
+# def get_called_obj(fname, objhash):
+
+#     for rec in dbcursor.execute(
+#             """SELECT called_name, called_objhash, called_calldefhash
+#                FROM calls
+#                WHERE caller_objhash = ?""",
+#             (objhash, )):
+
+#         called = function_call(name=rec[0], objhash=rec[1], calldefhash=rec[2])
+#         yield fname, called
+#         if objhash != called.objhash:
+#             yield from get_called_obj(called.name, called.objhash)
+
+# def print_obj_callstack(func):
+#     print(dir(func))
+#     return
+#     for o in get_called_obj(func._fluf_name, func._fluf_objhash):
+#         print(o)
+
+
+
+# def check_call_stack(caller):
+#     return
+
+#     lgr_callstack.debug('$ check callstack for call "%s" obj:%s call:%s ',
+#                         caller.name, caller.objhash, caller.calldefhash)
+
+#     nothing_changed = True
+#     self_call_found = False
+
+#     for _cn, called in get_called(caller):
+#         #print('!!!!', caller.name, _cn, called.name, called.objhash)
+#         if called.objhash == caller.objhash:
+#             # ~~~ should alwasy be there
+#             self_call_found = True
+#         function_still_present = called.objhash in OBJHASHES
+#         if function_still_present:
+#             lgr_callstack.debug(
+#                 "  - called %s obj:%s still ok",
+#                                 called.name, called.objhash)
+#         else:
+#             lgr_callstack.info("!Change in callstack for %s: %s obj:%s !!!",
+#                                caller.name, called.name, called.objhash)
+#             nothing_changed = False
+#             # remove this caller record from callstack
+#             # the stack is not complete - so need to rerun
+#             dbcursor.execute(
+#                 """DELETE FROM calls
+#                          WHERE caller_objhash = ?
+#                            AND caller_calldefhash = ?
+#                            AND called_objhash = ? """,
+#                 (caller.objhash, caller.calldefhash, called.objhash))
+#             break
+
+#     if not self_call_found:
+#         lgr.info("no callstack record of this run?")
+#         # unsure if this should be the case - but we cannot validate that the
+#         # callstack has changed - so best advise rerun
+#         return False
+
+#     # else - if no called code has changed - keep it as is
+#     return nothing_changed
 
 mplcache = partial(cache, extension='png', loader=mpl_loader, saver=mpl_saver)
+
+
 txtcache = partial(cache, extension='txt', loader=txt_loader, saver=txt_saver)
