@@ -116,7 +116,7 @@ def cache(cachename=None,
 
             lgr.debug(f"final cache file name is {cachefilename}")
 
-            action_taken = None
+            action_taken = "run"  # unless we convince ourselves otherwise
             why_not_use_diskcache = ""
 
 
@@ -170,7 +170,12 @@ def cache(cachename=None,
                                   f"'{why_not_use_diskcache}': %s %s",
                                   basename, fcall)
 
-            if action_taken is None:
+            srun_fcall.action = action_taken
+            srun_fcall.why_not_cache = why_not_use_diskcache
+
+
+            if action_taken == "run":
+
 
                 # it appears we've not found anything to return yet
                 # - so - we'll have to re-run the function
@@ -182,7 +187,28 @@ def cache(cachename=None,
                 # so we can recall later if all parent bits have not
                 # changed
 
-                rv = func(*args, **kwargs)
+                try:
+                    rv = func(*args, **kwargs)
+                except Exception as e:
+
+                    with db.DB.atomic():
+                        store_callstack(fcall)
+                        srun_fcall.stop = datetime.now()
+                        srun_fcall.success = False
+                        srun_fcall.runtime = \
+                            (srun_fcall.stop - srun_fcall.start)\
+                            .total_seconds()
+                        import traceback as tb
+                        srun_fcall.error = \
+                            tb.format_exception(None, e,
+                                                e.__traceback__)
+                        srun_fcall.success = False
+                        srun_fcall.save()
+                        fcall.dirty = True
+                        fcall.save()
+                        lgr.warning(f"Error executing {func.ffunc} {fcall}")
+                    raise
+
                 if cache and diskcache and cachefilename is not None:
                     lgr.debug("caching to: %s", cachefilename)
                     saver(rv, cachefilename)
@@ -191,10 +217,11 @@ def cache(cachename=None,
             store_callstack(fcall)
             if publish_this_call:
                 publish_file(cachefilename, pubfilename)
-            srun_fcall.action = action_taken
-            srun_fcall.why_not_cache = why_not_use_diskcache
+
+            srun_fcall.success = True
             srun_fcall.stop = datetime.now()
-            srun_fcall.runtime = (srun_fcall.stop - srun_fcall.start).total_seconds()
+            srun_fcall.runtime = \
+                (srun_fcall.stop - srun_fcall.start).total_seconds()
             srun_fcall.save()
             fcall.dirty = False
             fcall.save()
@@ -208,6 +235,7 @@ def cache(cachename=None,
 def store_callstack(fcall):
     lgr.debug(f'investigate callstack of "{fcall}"')
     for frameinfo in inspect.stack()[2:]:
+
         # skip the first two entries
         #   - entry one is this function
         #   - entry two is the calling fcuntion (which is already in fcall)
@@ -226,48 +254,20 @@ def store_callstack(fcall):
 
 
 def print_state(func):
+
+    from rich import print as rprint
     ffunc = func.ffunc
-    srun = func.scriptrun
-    # funcs_in_this_run = [srf.function for srf in srun.srun_funcs]
-
-    # print(f"State of function: {ffunc} {srun}")
-    # dirty_calls = []
-    # affected_calls = []
-    # affected_relations = []
-
-    # def find_affected(fcall):
-    #     rfunc = fcall.function
-    #     dirty = rfunc not in funcs_in_this_run
-    #     if dirty:
-    #         dirty_calls.append(fcall)
-    #         affected_calls.append(fcall)
-
-    #     any_called_dirty = False
-    #     for fcaller in fcall.caller:
-    #         if find_affected(fcaller.called):
-    #             # caller is affected - we are affected
-    #             any_called_dirty = True
-    #             affected_relations.append(fcaller)
-
-    #     if any_called_dirty:
-    #         affected_calls.append(fcall)
-
-    #     return any_called_dirty or dirty
-
-    # for fcall in ffunc.calls:
-    #     find_affected(fcall)
-
-    # # for d in dirty_calls:
-    # #     print('dirty', d)
-    # # for d in affected_calls:
-    # #     print('affected', d)
-    # # for d in affected_relations:
-    # #     print('affected relation', d)
 
     def print_call(prefix, fcall):
-        print(prefix, fcall)
+        # get most recent srfc
+        SRFC = db.ScriptRunFunctionCall
+        srfc = SRFC.select().where(SRFC.fcall == fcall)\
+                            .order_by(-SRFC.start)\
+                            .get()
+        rprint(prefix + "[grey46]+[/grey46]"
+               + fcall.rich_str(), srfc.rich_str())
         for fcaller in fcall.caller:
-            print_call("  " + prefix, fcaller.called)
+            print_call("[grey46]|[/grey46]   " + prefix, fcaller.called)
 
     for fcall in ffunc.calls:
         print_call("", fcall)
@@ -284,6 +284,15 @@ def prep_callstack(func, delete_relations=True):
         def find_affected(fcall):
             rfunc = fcall.function
             dirty = rfunc not in funcs_in_this_run
+
+            SRFC = db.ScriptRunFunctionCall
+            srfc = SRFC.select().where(SRFC.fcall==fcall)\
+                                .order_by(-SRFC.start)\
+                                .get()
+
+            if not srfc.success:
+                dirty = True
+
             if dirty:
                 fcall.dirty = True
 

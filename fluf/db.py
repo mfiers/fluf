@@ -40,7 +40,7 @@ class Function(pw.Model):
         fc, created = FunctionCall.get_or_create(
             function=self, checksum=call_checksum)
         if created:
-            print(f"created new fcall {fc}")
+            lgr.debug(f"created new fcall {fc}")
             fc.dirty = True
         fc.name=name
         fc.save()
@@ -60,10 +60,16 @@ class FunctionCall(pw.Model):
     name = pw.CharField(null=True)
     dirty = pw.BooleanField(default=False)
 
+    def rich_str(self):
+        dirty = ' [bold orange_red1]dirty :t-rex:[/bold orange_red1]' if self.dirty else ''
+        rv = (f"<fcl [deep_sky_blue3]{self.name}[/deep_sky_blue3]:"
+              f"[dark_sea_green4]{self.checksum[:4]}[/dark_sea_green4]{dirty}>")
+        return rv
+
     def __str__(self):
-        dirty = '!' if self.dirty else ''
-        return (f"<fcl {dirty}{self.name}:"
-                f"{self.checksum[:4]}>")
+        dirty = ' dirty' if self.dirty else ''
+        return (f"<fcl {self.name}:"
+                f"{self.checksum[:4]}{dirty}>")
 
     def add_caller(self, caller):
         rv, created = FunctionCallFunction.get_or_create(
@@ -163,8 +169,19 @@ class ScriptRunFunctionCall(pw.Model):
     why_not_cache = pw.CharField(null=True)
     runtime = pw.FloatField(null=True)
 
+    error = pw.TextField(null=True)
+    success = pw.BooleanField(default=False)
+
     class Meta:
         database = DBPROXY
+
+    def rich_str(self):
+        from humanfriendly import format_timespan
+        error = ""
+        runtime = " in " + format_timespan(self.runtime, max_units=1)
+        if self.error:
+            error = " [red]ERROR :eggplant:[/red]"
+        return f"< {self.scriptrun.id} {self.fcall.name} {self.action}{runtime}{error}>"
 
     def __str__(self):
         return f"< {self.scriptrun.id} {self.fcall} {self.action} >"
