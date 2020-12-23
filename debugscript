@@ -1,0 +1,104 @@
+#!/usr/bin/env python
+
+
+import logging
+from rich.logging import RichHandler
+import os
+import matplotlib.pyplot as plt
+
+FORMAT = "%(message)s"
+logging.basicConfig(
+    level="INFO", format=FORMAT, datefmt="[%X]", handlers=[RichHandler()]
+)
+
+
+import fluf  # NOQA E402
+
+
+fluf.set_workfolder(os.path.expanduser('debug'))
+
+
+@fluf.cache()
+def a1():
+    return 'aaa'
+
+
+@fluf.cache()
+def a2():
+    return a1() + 'ada'
+
+
+@fluf.cache()
+def a3():
+    return a2() + 'ac'
+
+
+@fluf.cache()
+def a4():
+    return a3()
+
+
+@fluf.cache()
+def t1():
+    return 'aaa'
+
+
+@fluf.cache()
+def t2():
+    #1 / 0
+    return t1() + 'ada'
+
+
+@fluf.cache()
+def t3():
+    return t2() + 'a'
+
+
+@fluf.cache()
+def t4():
+    return t3() + a4()
+
+
+if __name__ == '__main__':
+
+    fluf.prep_callstack(t4, delete_relations=False)
+    fluf.print_state(t4)
+    t4()
+    # fluf.print_state(t4)
+    #assert t4() == 'abc'
+
+
+#    fluf.print_run_info(test)
+#    fluf.print_db_dump()
+
+
+
+
+# call stack:
+# functions:     t4 -> t3 -> t2 -> t1
+# calls          A     B     C     D
+# relations         q>    r>    s>
+#                   AB    BC    CD
+
+# on change of t1
+# functions     t4 -> t3 -> t2 -> t1*
+# all functions need rerunning (t4, t3, t2 & t1)
+
+# step 1: determine change:
+#    based on function hash
+#    in essence - keep a list of function hashes
+
+# functions     t4 -> t3 -> t2 -> t1*
+
+# step2: determine affected function from tree
+#        t1
+#
+# step3: determine affected function call
+#        D
+#
+# step4: iteratively determine other affected calls
+#        A B C D
+
+# step5: remove affected relations
+
+# step6: set affected calls to dirty
