@@ -1,0 +1,22 @@
+#!/usr/bin/env python
+
+import logging
+from rich.logging import RichHandler
+import os
+
+FORMAT = "%(message)s"
+logging.basicConfig(
+    level="DEBUG", format=FORMAT, datefmt="[%X]", handlers=[RichHandler()]
+)
+
+from fluf import fluf   # NOQA E402
+
+
+@fluf()
+def a1():
+    return 'aaaa'
+
+
+if __name__ == '__main__':
+
+    print(a1())
