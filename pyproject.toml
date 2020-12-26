@@ -11,6 +11,7 @@ matplotlib = "^3.3.3"
 peewee = "^3.14.0"
 rich = "^9.5.1"
 humanfriendly = "^9.1"
+click = "^7.1.2"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.1"

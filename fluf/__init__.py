@@ -20,10 +20,11 @@ from .memcache import insert_memcache, from_memcache, in_memcache
 from .helpers import publish_file, set_workfolder, get_workfolder, \
     get_cachefolder, get_func_code_checksum
 import fluf.db as db
-import fluf.config as config
+import fluf.config as config  # NOQA F401
 
+from fluf.cli import cli  # NOQA F401
 
-db.instantiate()
+db.instantiate()  # open db connection
 
 lgr = logging.getLogger('FLUF')
 lgr.setLevel(logging.INFO)
@@ -39,7 +40,8 @@ lgr_callstack.setLevel(logging.INFO)
 DEFAULTPUBLISH = True
 CHECKSUMLEN = 10
 
-FUNCTIONS_OBSERVED = set()
+FUNCTIONS = []
+DBFUNCS = []
 CACHENAMES = set()
 PUBLISHED = []
 CALLHISTORY = []
@@ -81,7 +83,9 @@ def cache(cachename=None,
 
     def cache_decorator(func):
 
+        FUNCTIONS.append(func)
         func.ffunc = db.Function.init(func)
+        DBFUNCS.append(func.ffunc)
         func.scriptrun = get_scriptrun_object()
         func.scriptrun.add_function(func.ffunc)
 

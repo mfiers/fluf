@@ -42,9 +42,13 @@ class Function(pw.Model):
         if created:
             lgr.debug(f"created new fcall {fc}")
             fc.dirty = True
-        fc.name=name
+        fc.name = name
         fc.save()
         return fc
+
+    def rich_str(self):
+        return (f"[deep_sky_blue3]{self.name}[/deep_sky_blue3]:"
+                f"[dark_sea_green4]{self.checksum[:4]}[/dark_sea_green4]")
 
     def __str__(self):
         return f"<fnc {self.name}:{self.checksum[:4]}>"
@@ -93,9 +97,6 @@ class FunctionCallFunction(pw.Model):
                 f"{self.called.name}:"
                 f"{self.called.checksum[:4]}>"
                 )
-
-
-#> {self.called}>" -> {self.called}>"
 
 
 class FunctionRun(pw.Model):
@@ -178,7 +179,11 @@ class ScriptRunFunctionCall(pw.Model):
     def rich_str(self):
         from humanfriendly import format_timespan
         error = ""
-        runtime = " in " + format_timespan(self.runtime, max_units=1)
+
+        if self.runtime is not None:
+            runtime = " in " + format_timespan(self.runtime, max_units=1)
+        else:
+            runtime = 'did not run'
         if self.error:
             error = " [red]ERROR :eggplant:[/red]"
         return f"< {self.scriptrun.id} {self.fcall.name} {self.action}{runtime}{error}>"

@@ -76,7 +76,7 @@ def set_workfolder(workfolder):
     #if len(FUNCTIONS_OBSERVED) > 0:
     #    print("Must set workfolder before any fluf definitions")
     #    exit()
-    config.WORKFOLDER = workfolder
+    config.WORKFOLDER = os.path.abspath(os.path.expanduser(workfolder))
 
 
 def get_workfolder():
