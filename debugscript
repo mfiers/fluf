@@ -2,21 +2,60 @@
 
 import logging
 from rich.logging import RichHandler
-import os
+
+lgr = logging.getLogger('debug')
 
 FORMAT = "%(message)s"
 logging.basicConfig(
     level="DEBUG", format=FORMAT, datefmt="[%X]", handlers=[RichHandler()]
 )
 
-from fluf import fluf   # NOQA E402
+
+fluf_config = dict(
+    cache_path='~/tmp/fluf_debug/cache',
+    publish_path='~/tmp/fluf_debug/',
+    )
+
+from fluf import fluf, fluftxt, cli, app, prepare_run   # NOQA E402
 
 
-@fluf()
-def a1():
-    return 'aaaa'
+@fluftxt()
+def a0(y):
+    """ test a0 """
+    return 'a0:' + str(y)
+
+@fluftxt()
+def a1(y):
+    """ test a1 - """
+    return 'a1:' + a0(y)
+
+@fluftxt()
+def a2(y):
+    """ test a2 """
+    return 'a2:' + a1(y)
+
+@fluftxt()
+def a2a(y):
+    """ test a2a - """
+    return 'a2a:' + a1(y)
+
+@fluftxt()
+def a3(y):
+    """ test a3 """
+    return 'a3:' + a2(y)
+
+@fluftxt()
+def a3a(y):
+    """ test a3a - """
+    return 'a3a:' + a2a(y)
 
 
 if __name__ == '__main__':
 
-    print(a1())
+    prepare_run()
+    app.api.print_callstack(a3)
+    app.api.print_callstack(a3a)
+    print(a3('debug'))
+    print(a3a('debug'))
+    app.api.print_callstack(a3)
+    app.api.print_callstack(a3a)

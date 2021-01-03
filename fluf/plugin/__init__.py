@@ -10,31 +10,71 @@ class FlufSpec:
     """ Fluf hook specification """
 
     @fluf_hook_spec
-    def appinit(self, appdata):
+    def plugin_load(self, app):
+        """ time to define configuration options """
+
+    @fluf_hook_spec
+    def load_config(self, app):
         """ Initialization of the application """
 
     @fluf_hook_spec
-    def init(self, appdata, func):
-        """ Initialization of a function """
+    def app_init(self, app):
+        """ Initialization of the application """
+
+    @fluf_hook_spec(firstresult=True)
+    def initialize_function(self, app, func, decorator_kwargs):
+        """
+        Initialize function & function data storage
+        Should be only one function doing this - default
+        in `plugin.db`
+        """
 
     @fluf_hook_spec
-    def check(self):
+    def prepare_function(self, app, func, decorator_kwargs):
         """ Check function prior to running """
 
     @fluf_hook_spec
-    def get_priority(self, appdata, func):
-        """ Advertise priority
+    def prepare_run(self, app):
+        """
+        Prepare for running
 
-            only the highest priority function will be called
-            0 is very high, 100 is very low
-            None means that this plugin does not want (or can)
-            yield a result
-
+        Should be called only once - after all fucntions are loaded
         """
 
     @fluf_hook_spec(firstresult=True)
-    def get_result(self, appdata, func, args, kwargs):
-        """ Do something to retrieve the results - cache or execute """
+    def initialize_call(self, app, func, args, kwargs):
+        """
+        Initialize function call &  data storage
+        Should be only one function doing this
+        """
+
+    @fluf_hook_spec
+    def finish_call(self, app, func, fcall, finvoc, rv):
+        """ Check function prior to running """
+
+    @fluf_hook_spec
+    def post_call(self, app, func, fcall, finvoc, args, kwargs, rv):
+        """ Check function prior to running """
+
+    @fluf_hook_spec
+    def get_priority(self, app, func, fcall, finvoc):
+        """Advertise resolve priority
+
+        Only the highest priority function will be called 0 is very
+        high, 99 is very low. A value of 100 (or more) will neve be
+        called
+
+        """
+    @fluf_hook_spec
+    def on_success_call(self, app, func, fcall, finvoc, rv):
+        """On a successfull call """
+    @fluf_hook_spec
+    def on_failed_call(self, app, func, fcall, finvoc, rv):
+        """On a failed call """
+
+    @fluf_hook_spec(firstresult=True)
+    def get_result(self, app, func, fcall, finvoc, args, kwargs):
+        """ Do something to retrieve the results"""
 
     @fluf_hook_spec
     def prerun(self):
@@ -45,7 +85,7 @@ class FlufSpec:
         """ after an actual run """
 
     @fluf_hook_spec
-    def appexit(self, appdata):
+    def app_exit(self, app):
         """ Clean app exit """
 
 

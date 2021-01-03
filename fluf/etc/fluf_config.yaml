@@ -1,0 +1,3 @@
+
+cache_folder: "fluf/cache"
+db_folder: ~/.cache/fluf

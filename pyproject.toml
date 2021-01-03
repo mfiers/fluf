@@ -1,8 +1,9 @@
 [tool.poetry]
 name = "fluf"
-version = "0.1.12"
+version = "0.2"
 description = "Simple caching & workflow"
 authors = ["Mark Fiers <mark.fiers.42@gmail.com>"]
+include = ["fluf/etc/fluf_config.yaml"]
 
 [tool.poetry.dependencies]
 python = "^3.7"
@@ -13,6 +14,9 @@ rich = "^9.5.1"
 humanfriendly = "^9.1"
 click = "^7.1.2"
 pluggy = "^0.13.1"
+configobj = "^5.0.6"
+strictyaml = "^1.1.1"
+networkx = "^2.5"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.1"

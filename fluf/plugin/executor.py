@@ -1,37 +1,33 @@
 
 
-from dataclasses import dataclass
 import logging
 
 from fluf.plugin import fluf_hook_impl
 
 lgr = logging.getLogger('__name__')
-
-
-@dataclass
-class FlufExecutorData:
-    pass
+lgr.setLevel(logging.WARNING)
 
 
 class FlufExecutor():
     """ Function execution executor """
 
     @fluf_hook_impl
-    def appinit(self, appdata):
-        lgr.debug("Start")
-        self.data = appdata.executor = FlufExecutorData()
-
-    @fluf_hook_impl
-    def get_priority(self, appdata, func):
+    def get_priority(self, app, func, fcall, finvoc):
         """ this executor shoud always work? """
         return 50, self
 
     @fluf_hook_impl
-    def get_result(self, appdata, func, args, kwargs):
+    def get_result(self, app, func, fcall, finvoc, args, kwargs):
         lgr.debug("start execution")
-        return func(*args, **kwargs)
-        lgr.debug("finish execution")
-
-    @fluf_hook_impl
-    def appexit(self, appdata):
-        lgr.debug("Exit")
+        try:
+            rv = func(*args, **kwargs)
+            finvoc.success = True
+            finvoc.from_cache = False
+            return rv
+        except:
+            lgr.warning(f"Failed running function {fcall}")
+            finvoc.success = False
+            fcall.dirty = True
+            finvoc.save()
+            fcall.save()
+            raise
