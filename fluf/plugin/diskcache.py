@@ -44,10 +44,10 @@ class FlufDiskcache():
             app.register_datatype(dt)
 
     def get_datatype(self, app, datatype):
-        if issubclass(datatype, datatypes.FlufDataType):
-            return datatype
-        elif isinstance(datatype, str) and datatype in app.datatypes:
+        if isinstance(datatype, str) and datatype in app.datatypes:
             return app.datatypes[datatype]
+        elif issubclass(datatype, datatypes.FlufDataType):
+            return datatype
 
         lgr.warning(f"invalid datatype: {datatype}")
         raise Exception()
