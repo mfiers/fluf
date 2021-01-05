@@ -22,11 +22,11 @@ lgr.setLevel(logging.WARNING)
 
 
 def get_db(app, script_uid):
-    db_folder = app.config['db_folder']
-    db_folder = os.path.abspath(os.path.expanduser(db_folder))
-    if not os.path.exists(db_folder):
-        os.makedirs(db_folder)
-    db_file = os.path.join(db_folder, f"{script_uid}.sqlite")
+    db_path = app.config['db_path']
+    db_path = os.path.abspath(os.path.expanduser(db_path))
+    if not os.path.exists(db_path):
+        os.makedirs(db_path)
+    db_file = os.path.join(db_path, f"{script_uid}.sqlite")
     db = pw.SqliteDatabase(db_file, pragmas={'foreign_keys': 1})
     models.db_proxy.initialize(db)
     db.create_tables(models.all_models)
