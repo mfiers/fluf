@@ -80,7 +80,7 @@ def fluf(**decorator_kwargs):
                                   finvoc=finvoc, args=args,
                                   kwargs=kwargs)
 
-            # Now somehow get the output of this function call!!
+            # Now somehow get the output of this function call!
 
             # here we call each plugin with which priority they want
             # to execute `get_result` - only the highest priority
@@ -137,3 +137,4 @@ def fluf(**decorator_kwargs):
 
 # shortcut - cache to text
 fluftxt = partial(fluf, datatype='text')
+flufmpl = partial(fluf, datatype='mpl')

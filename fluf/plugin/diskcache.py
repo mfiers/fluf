@@ -53,7 +53,7 @@ class FlufDiskcache():
         raise Exception()
 
     def get_cache_name(self, app, func, fcall):
-        conf = func.fconfig
+        conf = fcall.config
         cachepath = conf['cache_path']
         if not os.path.exists(cachepath):
             os.makedirs(cachepath)
@@ -70,7 +70,7 @@ class FlufDiskcache():
 
     def get_publish_name(self, app, func, fcall):
         """ Determine path to publish the file to """
-        conf = func.fconfig
+        conf = fcall.config
         publishpath = conf['publish_path']
         if not os.path.exists(publishpath):
             os.makedirs(publishpath)

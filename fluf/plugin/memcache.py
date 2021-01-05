@@ -28,7 +28,7 @@ class FlufMemcache():
 
     @fluf_hook_impl
     def get_result(self, app, func, fcall, finvoc, args, kwargs):
-        lgr.info(f"Return call {fcall} from memcache")
+        lgr.debug(f"Return call {fcall} from memcache")
         try:
             rv = self.data[fcall.uid]
             finvoc.success = True

@@ -49,3 +49,15 @@ class FlufConfig():
         config.update(decorator_kwargs)
         config = app.validate_config_custom(config)
         func.fconfig = config
+
+    @fluf_hook_impl
+    def prepare_call(self, app, func, fcall, finvoc, args, kwargs):
+        update_config = {}
+        for k, v in kwargs.items():
+            if k.startswith('fluf_'):
+                update_config[k[5:]] = v
+
+        config = copy.deepcopy(func.fconfig)
+        config.update(update_config)
+        config = app.validate_config_custom(config)
+        fcall.config = config
