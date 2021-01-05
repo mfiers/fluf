@@ -9,7 +9,7 @@ from fluf.util import path_validate
 
 lgr = logging.getLogger(__name__)
 lgr.setLevel(logging.INFO)
-# lgr.setLevel(logging.DEBUG)
+lgr.setLevel(logging.DEBUG)
 
 
 def datatype_validate(obj):
@@ -90,9 +90,9 @@ class FlufDiskcache():
         """ only run when in memcache - but then with high priority """
 
         lgr.debug(f"Use diskcache for call {fcall}?")
-        lgr.debug(f"  - discache in config: {func.fconfig['diskcache']}")
+        lgr.debug(f"  - discache in config: {fcall.config['diskcache']}")
         lgr.debug(f"  - call dirty?: {fcall.dirty}")
-        if not func.fconfig['diskcache']:
+        if not fcall.config['diskcache']:
             # no caching
             lgr.debug(f"no diskcache - priority 1000 for {fcall}")
             return 1000, self
@@ -113,7 +113,7 @@ class FlufDiskcache():
 
     @fluf_hook_impl
     def get_result(self, app, func, fcall, finvoc, args, kwargs):
-        conf = func.fconfig
+        conf = fcall.config
         datatype = self.get_datatype(app, conf['datatype'])
         cachefile = self.get_cache_name(app, func, fcall)
         basename = os.path.basename(cachefile)
@@ -135,7 +135,7 @@ class FlufDiskcache():
 
     @fluf_hook_impl
     def on_success_call(self, app, func, fcall, finvoc, rv):
-        conf = func.fconfig
+        conf = fcall.config
         if not conf['diskcache']:
             # do nothing
             # lgr.debug(f"not caching to disk {fcall}")

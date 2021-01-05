@@ -15,10 +15,8 @@ lgr.setLevel(logging.DEBUG)
 
 def get_default_config():
 
-    # TODO: remove this - it is not really necessary - defaults are
-    # specified upon parameter declaration in the code
-    defconf = importlib.resources.read_text(fluf.etc, 'fluf_config.yaml')
-    config = sy.load(defconf).data
+    # defconf = importlib.resources.read_text(fluf.etc, 'fluf_config.yaml')
+    config = {}  # start with empy config -
     if 'function' not in config:
         config['function'] = {}
 
@@ -45,19 +43,16 @@ class FlufConfig():
 
     @fluf_hook_impl
     def prepare_function(self, app, func, decorator_kwargs):
-        config = copy.deepcopy(app.config)
-        config.update(decorator_kwargs)
-        config = app.validate_config_custom(config)
-        func.fconfig = config
+        func.fdecorator_kwargs = decorator_kwargs
 
     @fluf_hook_impl
     def prepare_call(self, app, func, fcall, finvoc, args, kwargs):
-        update_config = {}
+        update_config = copy.deepcopy(func.fdecorator_kwargs)
         for k, v in kwargs.items():
             if k.startswith('fluf_'):
                 update_config[k[5:]] = v
 
-        config = copy.deepcopy(func.fconfig)
+        config = copy.deepcopy(app.config)
         config.update(update_config)
         config = app.validate_config_custom(config)
         fcall.config = config
