@@ -15,7 +15,7 @@ from .plugin.db import FlufDb
 from .plugin.config import FlufConfig
 from .plugin.calltracer import FlufCallTracer
 
-from .app import FlufApp
+from .app import FlufApp, FlufParameter           # NOQA F401
 from .cli import cli                              # NOQA F401
 
 fpm.register(FlufLogger())
@@ -41,6 +41,12 @@ atexit.register(exit_handler)                     # NOQA E305
 
 
 _prepare_run_called = False
+
+
+def fset(**kwargs):
+    """ helper function to define parameters """
+    for k, v in kwargs.items():
+        app.set_parameter(k, v)
 
 
 def prepare_run():
