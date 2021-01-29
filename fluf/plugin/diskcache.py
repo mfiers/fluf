@@ -9,7 +9,7 @@ from fluf.util import path_validate
 
 lgr = logging.getLogger(__name__)
 lgr.setLevel(logging.INFO)
-lgr.setLevel(logging.DEBUG)
+# lgr.setLevel(logging.DEBUG)
 
 
 def datatype_validate(obj):

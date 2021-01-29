@@ -25,11 +25,11 @@ def get_call_uid(ffunc, args, kwargs, hash_length):
     hasher = sha256()
     hasher.update(ffunc.uid.encode())
     for a in args:
-        hasher.update(dill.dumps(a))
+        hasher.update(dill.dumps(a, protocol=4))
 
     for k, v in sorted(kwargs.items()):
-        hasher.update(dill.dumps(k))
-        hasher.update(dill.dumps(v))
+        hasher.update(dill.dumps(k, protocol=4))
+        hasher.update(dill.dumps(v, protocol=4))
 
     call_uid = 'c' + hasher.hexdigest()[:hash_length]
     # lgr.debug("Call UID: %s", call_uid)
